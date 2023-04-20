@@ -1,0 +1,151 @@
+/*
+ * this files contains any piece of code written that is no longer required
+ * maybe because it was written just for testing or replaced by a better alternative
+ */
+
+
+void audio_loopback(){
+	  if (BSP_AUDIO_IN_OUT_Init(INPUT_DEVICE_DIGITAL_MICROPHONE_2, OUTPUT_DEVICE_HEADPHONE, DEFAULT_AUDIO_IN_FREQ, DEFAULT_AUDIO_IN_BIT_RESOLUTION, DEFAULT_AUDIO_IN_CHANNEL_NBR) == AUDIO_OK)
+	  {
+	    BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	    BSP_LCD_SetTextColor(LCD_COLOR_GREEN);
+	    BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 95, (uint8_t *)"  AUDIO RECORD INIT OK  ", CENTER_MODE);
+	  }
+	  else
+	  {
+	    BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	    BSP_LCD_SetTextColor(LCD_COLOR_RED);
+	    BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 95, (uint8_t *)"  AUDIO RECORD INIT FAIL", CENTER_MODE);
+	    BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 80, (uint8_t *)" Try to reset board ", CENTER_MODE);
+	  }
+	  /* Display the state on the screen */
+	    BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	    BSP_LCD_SetTextColor(LCD_COLOR_BLUE);
+	    BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 75, (uint8_t *)"Starting audio loop-back", CENTER_MODE);
+
+	    /* Initialize SDRAM buffers */
+	    memset((uint16_t*)AUDIO_BUFFER_IN, 0, AUDIO_BLOCK_SIZE*2);
+	    memset((uint16_t*)AUDIO_BUFFER_IN, 0, AUDIO_BLOCK_SIZE*2);
+	    audio_rec_buffer_state = BUFFER_OFFSET_NONE;
+
+	    /* Start Recording */
+	    BSP_AUDIO_IN_Record((uint16_t*)AUDIO_BUFFER_IN, AUDIO_BLOCK_SIZE*2);
+	    /* Start Playback */
+	    BSP_AUDIO_OUT_SetAudioFrameSlot(CODEC_AUDIOFRAME_SLOT_02);
+	    BSP_AUDIO_OUT_SetVolume(90);
+	    BSP_AUDIO_OUT_Play((uint16_t*)AUDIO_BUFFER_OUT, AUDIO_BLOCK_SIZE*2);
+	    BSP_LCD_SetTextColor(LCD_COLOR_RED);
+	    BSP_LCD_DisplayStringAt(0, BSP_LCD_GetYSize() - 55, (uint8_t *)"Microphones sound streaming to headphones", CENTER_MODE);
+	    while(1){
+			BSP_TS_GetState(&TS_State);
+			if(TS_State.touchDetected){
+				BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+				BSP_AUDIO_OUT_Stop(CODEC_PDWN_SW);
+				return;
+			}
+		}
+}
+
+void rec_and_play(){
+	uint8_t status;
+	BSP_LCD_Clear(LCD_COLOR_WHITE);
+	BSP_LCD_SetBackColor(LCD_COLOR_WHITE);
+	BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+	BSP_LCD_DisplayStringAt(0, 0, (uint8_t *)"Audio Record And Play App", CENTER_MODE);
+	status = BSP_AUDIO_IN_Init(DEFAULT_AUDIO_IN_FREQ, DEFAULT_AUDIO_IN_BIT_RESOLUTION, DEFAULT_AUDIO_IN_CHANNEL_NBR);
+	if(status == AUDIO_OK){
+		BSP_LCD_DisplayStringAt(0, 20, (uint8_t *)"Audio Record INIT OK", CENTER_MODE);
+		BSP_LCD_DisplayStringAt(0, 40, (uint8_t *)"Touch OK to start recording", CENTER_MODE);
+	}
+	else{
+		BSP_LCD_DisplayStringAt(0, 20, (uint8_t *)"Audio Record INIT Failed", CENTER_MODE);
+		BSP_LCD_DisplayStringAt(0, 40, (uint8_t *)"Exiting", CENTER_MODE);
+		return;
+	}
+	drawOK();
+	while(!isOKTouched()){
+		HAL_Delay(100);
+	}
+	BSP_LCD_DisplayStringAt(0, 40, (uint8_t *)"Recording                        ", CENTER_MODE);
+	audio_rec_buffer_state = BUFFER_OFFSET_NONE;
+	uint16_t  internal_buffer[BLOCK_SIZE * 2];
+	memset(internal_buffer, 0, sizeof(internal_buffer));
+	BSP_AUDIO_IN_Record((uint16_t*)internal_buffer, BLOCK_SIZE);
+	int cont = 1, block_number;
+	for (block_number = 0; block_number < AUDIO_NB_BLOCKS && cont; block_number++){
+		BSP_LCD_SetTextColor(LCD_COLOR_RED);
+		BSP_LCD_FillCircle(200,200,10);
+		while(audio_rec_buffer_state != BUFFER_OFFSET_HALF){
+		  if (isTouched()){
+			BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+			cont = 0;
+			break;
+		  }
+		}
+		audio_rec_buffer_state = BUFFER_OFFSET_NONE;
+		memcpy((uint32_t *)(AUDIO_REC_START_ADDR + (block_number * BLOCK_SIZE * 2)),
+			   internal_buffer,
+			   BLOCK_SIZE * 2);
+		BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
+		BSP_LCD_FillCircle(200,200,10);
+		while(cont && audio_rec_buffer_state != BUFFER_OFFSET_FULL){
+		  if (isTouched()){
+			BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+			cont = 0;
+			break;
+		  }
+		}
+		audio_rec_buffer_state = BUFFER_OFFSET_NONE;
+		memcpy((uint32_t *)(AUDIO_REC_START_ADDR + (block_number * BLOCK_SIZE * 2) + (BLOCK_SIZE * 2)),
+			   (uint16_t *)(&internal_buffer[BLOCK_SIZE]),
+			   BLOCK_SIZE * 2);
+	}
+	int len = block_number;
+	HAL_Delay(100);
+	BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+	BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+	BSP_LCD_DisplayStringAt(0, 60, (uint8_t *)"Audio Record Complete", CENTER_MODE);
+	BSP_LCD_DisplayStringAt(0, 80, (uint8_t *)"Touch Screen to play audio", CENTER_MODE);
+	while(!isTouched()){
+	}
+	BSP_AUDIO_OUT_Init(OUTPUT_DEVICE_HEADPHONE, 50, DEFAULT_AUDIO_IN_FREQ);
+	BSP_AUDIO_OUT_SetAudioFrameSlot(CODEC_AUDIOFRAME_SLOT_02);
+	BSP_LCD_DisplayStringAt(0, 100, (uint8_t *)"Playing recorded audio....", CENTER_MODE);
+	cont = 1;
+	memset(internal_buffer, 0, sizeof(internal_buffer));
+	audio_play_buffer_state = BUFFER_OFFSET_NONE;
+	BSP_AUDIO_OUT_Play((uint16_t*)internal_buffer, BLOCK_SIZE * 2);
+	for (block_number = 0; block_number < len && cont; block_number++){
+		BSP_LCD_SetTextColor(LCD_COLOR_RED);
+		BSP_LCD_FillCircle(200,200,10);
+		while(audio_play_buffer_state != BUFFER_OFFSET_HALF){
+		  if (isTouched()){
+			BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+			cont = 0;
+			break;
+		  }
+		}
+		memcpy(internal_buffer,
+			  (uint32_t *)(AUDIO_REC_START_ADDR + (block_number * BLOCK_SIZE * 2)),
+			   BLOCK_SIZE * 2);
+		audio_play_buffer_state = BUFFER_OFFSET_NONE;
+		BSP_LCD_SetTextColor(LCD_COLOR_WHITE);
+		BSP_LCD_FillCircle(200,200,10);
+		while(cont && audio_play_buffer_state != BUFFER_OFFSET_FULL){
+		  if (isTouched()){
+			BSP_AUDIO_IN_Stop(CODEC_PDWN_SW);
+			cont = 0;
+			break;
+		  }
+		}
+		memcpy((uint16_t *)(&internal_buffer[BLOCK_SIZE]),
+			(uint32_t *)(AUDIO_REC_START_ADDR + (block_number * BLOCK_SIZE * 2) + (BLOCK_SIZE * 2)),
+		   BLOCK_SIZE * 2);
+		audio_play_buffer_state = BUFFER_OFFSET_NONE;
+	}
+	BSP_LCD_SetTextColor(LCD_COLOR_BLACK);
+	BSP_AUDIO_OUT_Stop(CODEC_PDWN_SW);
+	BSP_LCD_DisplayStringAt(0, 120, (uint8_t *)"Playback done", CENTER_MODE);
+	return;
+}
+
